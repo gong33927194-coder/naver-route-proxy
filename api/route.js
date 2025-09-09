@@ -1,40 +1,44 @@
-// Vercel 서버리스 함수용
+// Kakao Mobility Directions v1 프록시 (Vercel Serverless Function)
 export default async function handler(req, res) {
   try {
-    const { o, d } = req.query;
+    const { o, d } = req.query;                  // o="lon,lat", d="lon,lat"
     const [oLon, oLat] = (o || "").split(",").map(Number);
     const [dLon, dLat] = (d || "").split(",").map(Number);
 
     if ([oLon, oLat, dLon, dLat].some(v => Number.isNaN(v))) {
-      return res.status(400).json({ error: "bad params" });
+      return res.status(400).json({ error: "bad params", hint: "use lon,lat" });
     }
 
     const endpoint =
-      `https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving` +
-      `?start=${oLon},${oLat}&goal=${dLon},${dLat}`;
+      `https://apis-navi.kakaomobility.com/v1/directions` +
+      `?origin=${oLon},${oLat}&destination=${dLon},${dLat}` +
+      `&priority=RECOMMEND&summary=true`;
 
     const r = await fetch(endpoint, {
-      headers: {
-        "X-NCP-APIGW-API-KEY-ID": process.env.NAVER_ID,
-        "X-NCP-APIGW-API-KEY": process.env.NAVER_KEY
-      }
+      headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_KEY}` }
     });
 
+    const text = await r.text();
     if (!r.ok) {
-      const text = await r.text();
-      return res.status(502).setHeader("Access-Control-Allow-Origin", "*")
-        .json({ error: "naver-error", status: r.status, body: text });
+      return res
+        .status(r.status)
+        .setHeader("Access-Control-Allow-Origin", "*")
+        .json({ error: "kakao-error", status: r.status, body: text });
     }
 
-    const j = await r.json();
-    const ms = j?.route?.traoptimal?.[0]?.summary?.duration ?? null;
-    const dist = j?.route?.traoptimal?.[0]?.summary?.distance ?? null;
-    const durationSec = typeof ms === "number" ? Math.round(ms / 1000) : null;
+    const j = JSON.parse(text);
+    // Kakao 응답: summary.duration(초), summary.distance(미터)
+    const sec  = j?.routes?.[0]?.summary?.duration ?? null;
+    const dist = j?.routes?.[0]?.summary?.distance ?? null;
 
-    res.status(200).setHeader("Access-Control-Allow-Origin", "*")
-      .json({ durationSec, distanceMeters: dist, raw: j });
+    return res
+      .status(200)
+      .setHeader("Access-Control-Allow-Origin", "*")
+      .json({ durationSec: typeof sec === "number" ? sec : null, distanceMeters: dist, raw: j });
   } catch (e) {
-    res.status(500).setHeader("Access-Control-Allow-Origin", "*")
-      .json({ error: "exception", message: String(e) });
+    return res
+      .status(500)
+      .setHeader("Access-Control-Allow-Origin", "*")
+      .json({ error: "server-exception", message: String(e) });
   }
 }
